@@ -8,17 +8,14 @@ class Config:
     # Bot Configuration
     BOT_TOKEN = os.getenv('BOT_TOKEN', '').strip()
     
-    # Channel ID (with minus sign for public channels)
+    # Channel ID
     CHANNEL_ID = os.getenv('CHANNEL_ID', '').strip()
     
-    # Convert CHANNEL_ID to int if it's not empty
+    # Convert CHANNEL_ID to int
     if CHANNEL_ID:
-        try:
-            CHANNEL_ID = int(CHANNEL_ID)
-        except ValueError:
-            CHANNEL_ID = 0
+        CHANNEL_ID = int(CHANNEL_ID)
     
-    # Webhook URL (for production)
+    # Webhook URL
     WEBHOOK_URL = os.getenv('WEBHOOK_URL', '').strip()
     
     # Server Configuration
@@ -26,36 +23,22 @@ class Config:
     
     @classmethod
     def validate(cls):
-        """Validate required configuration"""
-        errors = []
-        
+        """Validate configuration."""
         if not cls.BOT_TOKEN:
-            errors.append("BOT_TOKEN is required (get from @BotFather)")
-        elif len(cls.BOT_TOKEN) < 20:
-            errors.append("BOT_TOKEN seems too short")
+            raise ValueError("BOT_TOKEN is required")
         
         if not cls.CHANNEL_ID:
-            errors.append("CHANNEL_ID is required")
-        elif cls.CHANNEL_ID > 0:
-            errors.append("CHANNEL_ID should be negative for channels (e.g., -1001234567890)")
+            raise ValueError("CHANNEL_ID is required")
         
-        if errors:
-            raise ValueError(f"Configuration errors: {', '.join(errors)}")
-        
-        print("✅ Configuration validated successfully!")
-        print(f"🤖 Bot Token: {cls.BOT_TOKEN[:15]}...")
+        print("✅ Configuration validated!")
+        print(f"🤖 Bot Token: {cls.BOT_TOKEN[:10]}...")
         print(f"📢 Channel ID: {cls.CHANNEL_ID}")
         print(f"🌐 Port: {cls.PORT}")
-        print(f"🔗 Webhook: {cls.WEBHOOK_URL if cls.WEBHOOK_URL else 'Disabled'}")
+        
         return True
 
-# Validate configuration on import
+# Validate
 try:
     Config.validate()
 except ValueError as e:
-    print(f"❌ Configuration Error: {e}")
-    print("\nPlease set these environment variables:")
-    print("BOT_TOKEN=your_bot_token_from_botfather")
-    print("CHANNEL_ID=-1001234567890")
-    print("PORT=10000")
-    print("WEBHOOK_URL=https://your-app.onrender.com")
+    print(f"❌ Error: {e}")
