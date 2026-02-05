@@ -1,6 +1,12 @@
 from flask import Flask, request, jsonify
 import logging
 from waitress import serve
+import asyncio
+import threading
+
+# Import telegram components
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram import Bot
 from main import UnbanBot
 from config import Config
 
@@ -10,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Initialize bot
+# Global bot application instance
 bot_app = None
 
 @app.route('/')
@@ -41,7 +47,6 @@ def set_webhook():
     if not Config.WEBHOOK_URL:
         return jsonify({"error": "WEBHOOK_URL not configured"}), 400
     
-    from telegram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
     
     webhook_url = f"{Config.WEBHOOK_URL}/{Config.BOT_TOKEN}"
@@ -55,7 +60,6 @@ def set_webhook():
 @app.route('/delete_webhook')
 def delete_webhook():
     """Delete webhook (switch to polling)"""
-    from telegram import Bot
     bot = Bot(token=Config.BOT_TOKEN)
     
     result = bot.delete_webhook()
@@ -70,52 +74,58 @@ def webhook():
     update = request.get_json()
     
     # Process update asynchronously
-    import asyncio
-    asyncio.run(bot_app.process_update(update))
+    async def process_update_async():
+        await bot_app.process_update(update)
+    
+    # Run async function in thread
+    thread = threading.Thread(target=lambda: asyncio.run(process_update_async()))
+    thread.start()
     
     return jsonify({"status": "ok"}), 200
+
+def setup_handlers(application, bot_instance):
+    """Setup all bot handlers"""
+    application.add_handler(CommandHandler("start", bot_instance.start))
+    application.add_handler(CommandHandler("help", bot_instance.help))
+    application.add_handler(CommandHandler("unban", bot_instance.unban_user))
+    
+    # Handle direct user ID messages
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
+        bot_instance.unban_user
+    ))
+    
+    application.add_error_handler(bot_instance.error_handler)
 
 def init_bot():
     """Initialize the bot application"""
     global bot_app
-    from telegram.ext import Application
     
     if Config.WEBHOOK_URL:
         logger.info("Starting in WEBHOOK mode")
-        # Initialize bot for webhook mode
-        bot_app = Application.builder().token(Config.BOT_TOKEN).build()
         
-        # Set up handlers
-        from main import UnbanBot
+        # Create bot instance for handlers
         temp_bot = UnbanBot()
         
-        # Register handlers
-        bot_app.add_handler(CommandHandler("start", temp_bot.start))
-        bot_app.add_handler(CommandHandler("help", temp_bot.help))
-        bot_app.add_handler(CommandHandler("unban", temp_bot.unban_user))
+        # Initialize application
+        bot_app = Application.builder().token(Config.BOT_TOKEN).build()
         
-        from telegram.ext import MessageHandler, filters
-        bot_app.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
-            temp_bot.unban_user
-        ))
-        
-        bot_app.add_error_handler(temp_bot.error_handler)
+        # Setup handlers
+        setup_handlers(bot_app, temp_bot)
         
         # Initialize bot
         bot_app.initialize()
         
         # Set webhook
-        from telegram import Bot
         bot = Bot(token=Config.BOT_TOKEN)
         webhook_url = f"{Config.WEBHOOK_URL}/{Config.BOT_TOKEN}"
         bot.set_webhook(webhook_url)
         logger.info(f"Webhook set to: {webhook_url}")
+        
     else:
         logger.info("Starting in POLLING mode")
         # Start bot in polling mode
         bot = UnbanBot()
-        import threading
         thread = threading.Thread(target=bot.run, daemon=True)
         thread.start()
 
