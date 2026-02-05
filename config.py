@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
 class Config:
@@ -8,10 +9,14 @@ class Config:
     BOT_TOKEN = os.getenv('BOT_TOKEN', '').strip()
     
     # Channel ID
-    CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1003374353864'))
+    CHANNEL_ID = os.getenv('CHANNEL_ID', '').strip()
     
-    # Owner ID
-    OWNER_ID = int(os.getenv('OWNER_ID', '7456681709'))
+    # Convert CHANNEL_ID to int
+    if CHANNEL_ID:
+        CHANNEL_ID = int(CHANNEL_ID)
+    
+    # Webhook URL
+    WEBHOOK_URL = os.getenv('WEBHOOK_URL', '').strip()
     
     # Server Configuration
     PORT = int(os.getenv('PORT', 10000))
@@ -25,14 +30,11 @@ class Config:
         if not cls.CHANNEL_ID:
             raise ValueError("CHANNEL_ID is required")
         
-        if not cls.OWNER_ID:
-            raise ValueError("OWNER_ID is required")
-        
         print("✅ Configuration validated!")
         print(f"🤖 Bot Token: {cls.BOT_TOKEN[:10]}...")
         print(f"📢 Channel ID: {cls.CHANNEL_ID}")
-        print(f"👑 Owner ID: {cls.OWNER_ID}")
         print(f"🌐 Port: {cls.PORT}")
+        
         return True
 
 # Validate

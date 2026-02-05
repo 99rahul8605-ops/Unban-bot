@@ -1,144 +1,157 @@
 import logging
-from flask import Flask, jsonify
-import subprocess
+from flask import Flask, request, jsonify
+from waitress import serve
+import asyncio
 import threading
-import time
-import os
+
+from main import application
 from config import Config
 
 # Set up logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Global variable to track if bot is running
-bot_process = None
+# Global event loop for async operations
+loop = None
 
-def run_bot():
-    """Run the bot in a separate process."""
-    global bot_process
+def init_bot():
+    """Initialize the bot with webhook."""
+    global loop
     
-    try:
-        logger.info("Starting Telegram bot...")
+    logger.info("Initializing bot...")
+    
+    # Create new event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Initialize application in the event loop
+    loop.run_until_complete(application.initialize())
+    logger.info("Application initialized")
+    
+    # Set webhook if URL is provided
+    if Config.WEBHOOK_URL:
+        webhook_url = f"{Config.WEBHOOK_URL}/{Config.BOT_TOKEN}"
+        logger.info(f"Setting webhook to: {webhook_url}")
         
-        # Run bot.py as a subprocess
-        bot_process = subprocess.Popen(
-            ["python", "bot.py"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            universal_newlines=True
-        )
-        
-        # Log bot output
-        def log_output(pipe, prefix):
-            for line in pipe:
-                if line.strip():
-                    logger.info(f"{prefix}: {line.strip()}")
-        
-        # Start logging threads
-        stdout_thread = threading.Thread(
-            target=log_output,
-            args=(bot_process.stdout, "BOT"),
-            daemon=True
-        )
-        stderr_thread = threading.Thread(
-            target=log_output,
-            args=(bot_process.stderr, "BOT-ERROR"),
-            daemon=True
-        )
-        
-        stdout_thread.start()
-        stderr_thread.start()
-        
-        logger.info(f"Bot process started with PID: {bot_process.pid}")
-        
-        # Wait for process to complete
-        bot_process.wait()
-        
-    except Exception as e:
-        logger.error(f"Error in bot process: {e}")
-        bot_process = None
+        try:
+            loop.run_until_complete(application.bot.set_webhook(webhook_url))
+            logger.info("Webhook set successfully!")
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
+
+# Initialize bot in a thread
+def start_bot():
+    """Start bot initialization in background."""
+    thread = threading.Thread(target=init_bot, daemon=True)
+    thread.start()
 
 @app.route('/')
 def home():
-    """Home page."""
     return jsonify({
         "status": "online",
         "service": "Telegram Unban Bot",
-        "owner_id": Config.OWNER_ID,
-        "channel_id": Config.CHANNEL_ID,
-        "bot_running": bot_process is not None and bot_process.poll() is None
+        "endpoints": {
+            "health": "/health",
+            "webhook": f"/{Config.BOT_TOKEN}",
+            "info": "/info"
+        }
     })
 
 @app.route('/health')
 def health():
-    """Health check endpoint for Render."""
-    bot_alive = bot_process is not None and bot_process.poll() is None
-    
-    status = {
-        "status": "healthy" if bot_alive else "degraded",
-        "bot": "running" if bot_alive else "not running",
-        "owner_id": Config.OWNER_ID,
-        "channel_id": Config.CHANNEL_ID,
-        "port": Config.PORT
-    }
-    
-    return jsonify(status), 200 if bot_alive else 503
+    """Health check for Render."""
+    return jsonify({"status": "healthy", "bot": "ready"}), 200
 
-@app.route('/restart')
-def restart():
-    """Restart the bot."""
-    global bot_process
-    
-    if bot_process:
-        bot_process.terminate()
-        bot_process.wait()
-        bot_process = None
-    
-    # Start bot in new thread
-    thread = threading.Thread(target=run_bot, daemon=True)
-    thread.start()
-    
-    return jsonify({"status": "restarting", "message": "Bot restart initiated"}), 200
-
-@app.route('/status')
-def status():
-    """Get detailed status."""
-    bot_alive = bot_process is not None and bot_process.poll() is None
-    
+@app.route('/info')
+def info():
+    """Get bot info."""
     return jsonify({
-        "bot_process": {
-            "pid": bot_process.pid if bot_process else None,
-            "alive": bot_alive,
-            "returncode": bot_process.poll() if bot_process else None
-        },
-        "config": {
-            "bot_token": Config.BOT_TOKEN[:10] + "..." if Config.BOT_TOKEN else None,
-            "channel_id": Config.CHANNEL_ID,
-            "owner_id": Config.OWNER_ID
-        },
-        "server": {
-            "port": Config.PORT
-        }
+        "bot_token": Config.BOT_TOKEN[:10] + "..." if Config.BOT_TOKEN else "not_set",
+        "channel_id": Config.CHANNEL_ID,
+        "webhook": Config.WEBHOOK_URL
     })
 
-if __name__ == '__main__':
-    # Start bot in background thread
-    logger.info(f"Starting bot for owner {Config.OWNER_ID}")
-    logger.info(f"Channel ID: {Config.CHANNEL_ID}")
+@app.route(f'/{Config.BOT_TOKEN}', methods=['POST'])
+def webhook():
+    """Handle Telegram webhook updates."""
+    try:
+        # Get update from request
+        json_data = request.get_json()
+        
+        # Create update object
+        from telegram import Update
+        update = Update.de_json(json_data, application.bot)
+        
+        # Process update in event loop
+        if loop and loop.is_running():
+            # Use run_coroutine_threadsafe for thread safety
+            future = asyncio.run_coroutine_threadsafe(
+                application.process_update(update),
+                loop
+            )
+            future.result(timeout=5)  # Wait for completion
+        else:
+            # Create new event loop if needed
+            asyncio.run(application.process_update(update))
+        
+        return jsonify({"status": "ok"}), 200
+        
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/set_webhook')
+def set_webhook():
+    """Manually set webhook."""
+    if not Config.WEBHOOK_URL:
+        return jsonify({"error": "WEBHOOK_URL not set"}), 400
     
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
+    webhook_url = f"{Config.WEBHOOK_URL}/{Config.BOT_TOKEN}"
+    
+    try:
+        # Use existing loop or create new one
+        if loop and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                application.bot.set_webhook(webhook_url),
+                loop
+            )
+            future.result(timeout=5)
+        else:
+            asyncio.run(application.bot.set_webhook(webhook_url))
+        
+        return jsonify({
+            "success": True,
+            "webhook_url": webhook_url
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/delete_webhook')
+def delete_webhook():
+    """Delete webhook."""
+    try:
+        if loop and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                application.bot.delete_webhook(),
+                loop
+            )
+            future.result(timeout=5)
+        else:
+            asyncio.run(application.bot.delete_webhook())
+        
+        return jsonify({"success": True}), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    logger.info(f"Starting server on port {Config.PORT}")
+    
+    # Start bot initialization
+    start_bot()
     
     # Start Flask server
-    logger.info(f"Starting Flask server on port {Config.PORT}")
-    
-    # Use waitress for production
-    from waitress import serve
     serve(app, host='0.0.0.0', port=Config.PORT)
