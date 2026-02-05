@@ -8,25 +8,40 @@ class Config:
     BOT_TOKEN = os.getenv('BOT_TOKEN', '').strip()
     
     # Channel ID
-    CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1003374353864'))
+    CHANNEL_ID = os.getenv('CHANNEL_ID', '').strip()
+    if CHANNEL_ID:
+        try:
+            CHANNEL_ID = int(CHANNEL_ID)
+        except ValueError:
+            CHANNEL_ID = 0
     
     # Owner ID
-    OWNER_ID = int(os.getenv('OWNER_ID', '7456681709'))
+    OWNER_ID = os.getenv('OWNER_ID', '').strip()
+    if OWNER_ID:
+        try:
+            OWNER_ID = int(OWNER_ID)
+        except ValueError:
+            OWNER_ID = 0
     
     # Server Configuration
-    PORT = int(os.getenv('PORT', 10000))
+    PORT = int(os.getenv('PORT', '10000'))
     
     @classmethod
     def validate(cls):
         """Validate configuration."""
+        errors = []
+        
         if not cls.BOT_TOKEN:
-            raise ValueError("BOT_TOKEN is required")
+            errors.append("BOT_TOKEN is required")
         
         if not cls.CHANNEL_ID:
-            raise ValueError("CHANNEL_ID is required")
+            errors.append("CHANNEL_ID is required")
         
         if not cls.OWNER_ID:
-            raise ValueError("OWNER_ID is required")
+            errors.append("OWNER_ID is required")
+        
+        if errors:
+            raise ValueError(f"Configuration errors: {', '.join(errors)}")
         
         print("✅ Configuration validated!")
         print(f"🤖 Bot Token: {cls.BOT_TOKEN[:10]}...")
@@ -35,8 +50,8 @@ class Config:
         print(f"🌐 Port: {cls.PORT}")
         return True
 
-# Validate
+# Validate on import
 try:
     Config.validate()
 except ValueError as e:
-    print(f"❌ Error: {e}")
+    print(f"❌ Configuration Error: {e}")
