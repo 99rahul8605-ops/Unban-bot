@@ -11,14 +11,8 @@ class Config:
     # Channel ID (with minus sign for public channels)
     CHANNEL_ID = int(os.getenv('CHANNEL_ID', '-1001234567890'))
     
-    # Webhook Configuration (for production)
-    WEBHOOK_URL = os.getenv('WEBHOOK_URL', '')
-    
     # Server Configuration
     PORT = int(os.getenv('PORT', 8080))
-    
-    # Admin Configuration (optional, for restricting commands)
-    ADMIN_IDS = [int(id.strip()) for id in os.getenv('ADMIN_IDS', '').split(',') if id.strip()]
     
     # Logging Configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
@@ -41,7 +35,6 @@ class Config:
         print(f"🤖 Bot Token: {cls.BOT_TOKEN[:10]}...")
         print(f"📢 Channel ID: {cls.CHANNEL_ID}")
         print(f"🌐 Port: {cls.PORT}")
-        print(f"🔗 Webhook URL: {cls.WEBHOOK_URL if cls.WEBHOOK_URL else 'Disabled (Polling)'}")
 
 # Validate configuration on import
 try:
